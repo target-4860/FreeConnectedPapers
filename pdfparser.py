@@ -1,7 +1,6 @@
 import logging
 import re
 from typing import Dict, List
-
 import pdfplumber
 import spacy
 
