@@ -1,20 +1,29 @@
 <template>
-  <div class="knowledge-graph">
-    <div class="graph-controls">
-      <button @click="resetGraph" class="control-button">
-        重置视图
-      </button>
-      <button @click="centerGraph" class="control-button">
-        居中
+  <div class="knowledge-graph-wrapper">
+    <!-- 知识图谱按钮 -->
+    <div class="graph-toggle-container">
+      <button @click="toggleGraphVisibility" class="toggle-button">
+        {{ isVisible ? '隐藏知识图谱' : '显示知识图谱' }}
       </button>
     </div>
     
-    <div class="loading-overlay" v-if="isLoading">
-      <div class="loading-spinner"></div>
-      <div class="loading-text">加载中...</div>
+    <div class="knowledge-graph" v-if="isVisible">
+      <div class="graph-controls">
+        <button @click="resetGraph" class="control-button">
+          重置视图
+        </button>
+        <button @click="centerGraph" class="control-button">
+          居中
+        </button>
+      </div>
+      
+      <div class="loading-overlay" v-if="isLoading">
+        <div class="loading-spinner"></div>
+        <div class="loading-text">加载中...</div>
+      </div>
+      
+      <div ref="graphContainer" class="graph-container"></div>
     </div>
-    
-    <div ref="graphContainer" class="graph-container"></div>
   </div>
 </template>
 
@@ -42,6 +51,7 @@ export default {
       nodes: [],
       links: [],
       isLoading: false,
+      isVisible: false, // 默认隐藏知识图谱
       transform: {
         x: 0,
         y: 0,
@@ -52,7 +62,7 @@ export default {
   watch: {
     papers: {
       handler(newPapers) {
-        if (newPapers.length > 0) {
+        if (newPapers.length > 0 && this.isVisible) {
           this.isLoading = true;
           setTimeout(() => {
             this.generateGraphData();
@@ -64,12 +74,29 @@ export default {
       deep: true
     },
     selectedPaper(newPaper) {
-      if (newPaper && this.svg) {
+      if (newPaper && this.svg && this.isVisible) {
         this.highlightNode(newPaper.id);
+      }
+    },
+    isVisible(newValue) {
+      if (newValue && this.papers.length > 0) {
+        // 当图谱变为可见时，初始化图谱
+        this.$nextTick(() => {
+          this.isLoading = true;
+          setTimeout(() => {
+            this.generateGraphData();
+            this.initializeGraph();
+            this.isLoading = false;
+          }, 500);
+        });
       }
     }
   },
   methods: {
+    toggleGraphVisibility() {
+      this.isVisible = !this.isVisible;
+    },
+    
     generateGraphData() {
       // 生成节点数据
       this.nodes = this.papers.map(paper => ({
@@ -78,7 +105,8 @@ export default {
         authors: paper.authors,
         year: paper.year,
         citations: paper.citations_count || 0,
-        r: this.calculateRadius(paper.citations_count || 0)
+        r: this.calculateRadius(paper.citations_count || 0),
+        keywords: paper.keywords || []
       }));
       
       // 生成连接数据
@@ -178,7 +206,8 @@ export default {
         .attr("stroke", "#fff")
         .attr("stroke-width", 1.5)
         .on("click", (event, d) => {
-          this.$emit('select-paper', this.papers.find(p => p.id === d.id));
+          // 点击节点时触发重新搜索
+          this.searchNodeKeywords(d);
         });
       
       // 节点文本
@@ -191,7 +220,7 @@ export default {
       
       // 添加悬停提示
       node.append("title")
-        .text(d => `${d.title}\n作者: ${d.authors.join(", ")}\n年份: ${d.year}\n引用数: ${d.citations}`);
+        .text(d => `${d.title}\n作者: ${d.authors ? d.authors.join(", ") : "未知"}\n年份: ${d.year || "未知"}\n引用数: ${d.citations || 0}\n点击可搜索相关内容`);
       
       // 更新力导向图
       this.simulation.on("tick", () => {
@@ -300,11 +329,32 @@ export default {
         // 高亮节点
         this.highlightNode(selectedNode.id);
       }
+    },
+    
+    searchNodeKeywords(node) {
+      // 提取节点关键词或标题作为搜索词
+      let searchTerm = '';
+      
+      if (node.keywords && node.keywords.length > 0) {
+        // 使用第一个关键词作为搜索词
+        searchTerm = node.keywords[0];
+      } else {
+        // 如果没有关键词，使用标题中的前几个词
+        const titleWords = node.title.split(' ');
+        searchTerm = titleWords.length > 3 ? titleWords.slice(0, 3).join(' ') : node.title;
+      }
+      
+      // 触发搜索事件
+      this.$emit('search-term', searchTerm);
     }
   },
   mounted() {
     // 窗口大小变化时重新渲染图谱
-    window.addEventListener('resize', this.initializeGraph);
+    window.addEventListener('resize', () => {
+      if (this.isVisible) {
+        this.initializeGraph();
+      }
+    });
   },
   beforeUnmount() {
     window.removeEventListener('resize', this.initializeGraph);
@@ -316,10 +366,40 @@ export default {
 </script>
 
 <style scoped>
-.knowledge-graph {
-  position: relative;
+.knowledge-graph-wrapper {
   width: 100%;
   height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.graph-toggle-container {
+  padding: 1rem;
+  display: flex;
+  justify-content: center;
+  background-color: #f9fafb;
+  border-bottom: 1px solid #eee;
+}
+
+.toggle-button {
+  padding: 0.6rem 1.2rem;
+  background-color: #2a7d8b;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  font-size: 0.9rem;
+  cursor: pointer;
+  transition: background-color 0.2s;
+}
+
+.toggle-button:hover {
+  background-color: #1a6575;
+}
+
+.knowledge-graph {
+  position: relative;
+  flex: 1;
+  width: 100%;
   background-color: #f9fafb;
   overflow: hidden;
 }

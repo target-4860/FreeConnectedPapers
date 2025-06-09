@@ -1,9 +1,9 @@
 <template>
   <div class="qa-panel">
     <div class="qa-header">
-      <h2>论文知识问答</h2>
-      <div v-if="selectedPaper" class="current-paper">
-        当前关联论文: <span>{{ selectedPaper.title }}</span>
+      <h2>医学知识问答</h2>
+      <div v-if="selectedItem" class="current-item">
+        当前关联资料: <span>{{ selectedItem.title }}</span>
       </div>
     </div>
     
@@ -14,7 +14,7 @@
           :key="index" 
           :class="['qa-message', item.role]"
         >
-          <div class="qa-content">{{ item.content }}</div>
+          <div class="qa-content" v-html="item.role === 'assistant' ? highlightText(item.content) : item.content"></div>
           <div v-if="item.role === 'assistant' && item.citations" class="qa-citations">
             引用: {{ item.citations }}
           </div>
@@ -22,11 +22,11 @@
       </template>
       
       <div v-else class="qa-empty-state">
-        <p>您可以提问关于当前论文的任何问题，例如:</p>
+        <p>您可以提问关于当前医学资料的任何问题，例如:</p>
         <ul>
-          <li>这篇论文的主要贡献是什么？</li>
-          <li>论文中提到的关键技术有哪些？</li>
-          <li>与其他相关工作有何区别？</li>
+          <li>高血压的诊断标准是什么？</li>
+          <li>高血压的常见治疗方法有哪些？</li>
+          <li>高血压与其他疾病有什么关联？</li>
         </ul>
       </div>
       
@@ -44,7 +44,7 @@
         ref="inputField"
         v-model="userInput" 
         @keydown.enter.prevent="handleSend"
-        placeholder="请输入论文相关问题..."
+        placeholder="请输入医学相关问题..."
         :disabled="isTyping"
         rows="3"
         class="qa-input"
@@ -64,9 +64,13 @@
 export default {
   name: 'QAPanel',
   props: {
-    selectedPaper: {
+    selectedItem: {
       type: Object,
       default: null
+    },
+    searchQuery: {
+      type: String,
+      default: ''
     }
   },
   data() {
@@ -77,12 +81,12 @@ export default {
     }
   },
   watch: {
-    selectedPaper(newPaper, oldPaper) {
-      if (newPaper && (!oldPaper || newPaper.id !== oldPaper.id)) {
-        // 当选择的论文改变时，添加一条系统消息
+    selectedItem(newItem, oldItem) {
+      if (newItem && (!oldItem || newItem.id !== oldItem.id)) {
+        // 当选择的项目改变时，添加一条系统消息
         this.conversations.push({
           role: 'system',
-          content: `已切换至论文：${newPaper.title}`
+          content: `已切换至：${newItem.title}`
         });
         this.scrollToBottom();
       }
@@ -117,21 +121,42 @@ export default {
       let response = '';
       let citations = '';
       
-      if (!this.selectedPaper) {
-        response = "请先选择一篇论文，以便我能更准确地回答您的问题。";
+      if (!this.selectedItem) {
+        response = "请先选择一项医学资料，以便我能更准确地回答您的问题。";
       } else {
-        // 根据问题内容和选中的论文生成模拟回答
-        if (question.includes('贡献') || question.includes('重要性')) {
-          response = `${this.selectedPaper.title} 的主要贡献在于提出了一种新的${this.selectedPaper.title.includes('Diffusion') ? '扩散模型' : '生成方法'}，能够实现高质量的图像生成。与之前的方法相比，该模型能够更好地控制生成过程，并且在图像质量和多样性方面取得了显著进步。`;
-          citations = "引用自论文摘要和第3节方法部分";
-        } else if (question.includes('方法') || question.includes('技术')) {
-          response = `该论文采用了${this.selectedPaper.title.includes('CLIP') ? 'CLIP潜在空间编码' : '扩散模型'} 作为核心技术，通过${this.selectedPaper.title.includes('Text') ? '文本条件引导' : '多阶段生成过程'} 来控制图像生成过程。这种方法能够有效利用大规模预训练模型的知识，实现高质量、可控的图像生成。`;
-          citations = "引用自论文第2节相关工作和第4节实验结果";
-        } else if (question.includes('结果') || question.includes('效果')) {
-          response = `根据论文第5节的实验结果，该方法在MS-COCO等数据集上的FID得分为${Math.floor(Math.random() * 10 + 5)}，优于此前的最佳方法。人类评估实验也表明，该方法生成的图像在视觉质量和文本对齐性方面均取得了显著提升。`;
-          citations = "引用自论文第5节实验评估部分";
+        // 根据问题内容和选中的项目生成模拟回答
+        const item = this.selectedItem;
+        const sourceType = item.sourceType;
+        
+        if (question.includes('诊断') || question.includes('标准')) {
+          if (sourceType === 'guideline') {
+            response = `根据《${item.title}》，高血压的诊断标准为：非同日3次测量，收缩压≥140mmHg和/或舒张压≥90mmHg。对于老年人、糖尿病患者和慢性肾病患者，诊断标准可能有所调整。`;
+            citations = "引用自指南诊断章节";
+          } else if (sourceType === 'textbook') {
+            response = `《${item.title}》中指出，高血压的诊断需要基于多次血压测量的结果，通常定义为收缩压≥140mmHg和/或舒张压≥90mmHg。需要注意的是，诊断高血压前应排除"白大衣高血压"的可能。`;
+            citations = "引用自教材第5章";
+          } else {
+            response = `关于高血压的诊断标准，一般参考最新的高血压指南。目前普遍接受的标准是：非同日3次测量，收缩压≥140mmHg和/或舒张压≥90mmHg。`;
+          }
+        } else if (question.includes('治疗') || question.includes('用药')) {
+          if (sourceType === 'guideline') {
+            response = `《${item.title}》推荐的高血压治疗包括：1) 生活方式干预：减少钠盐摄入、增加体力活动、限制饮酒、戒烟等；2) 药物治疗：常用药物包括利尿剂、β受体阻滞剂、钙拮抗剂、ACEI/ARB等。对于不同患者，应根据年龄、合并症等因素选择合适的药物。`;
+            citations = "引用自指南治疗章节";
+          } else if (sourceType === 'paper') {
+            response = `根据《${item.title}》的研究，高血压治疗的最新趋势是强调个体化治疗策略，根据患者的年龄、合并症、靶器官损害情况等因素选择最合适的药物组合。研究表明，早期联合治疗可能优于单药递增治疗策略。`;
+            citations = "引用自论文结果与讨论部分";
+          } else {
+            response = `高血压的治疗包括非药物治疗和药物治疗。非药物治疗包括减少钠盐摄入、增加体力活动、限制饮酒、戒烟等；药物治疗常用的五类降压药包括利尿剂、β受体阻滞剂、钙拮抗剂、ACEI和ARB。`;
+          }
+        } else if (question.includes('并发症') || question.includes('风险')) {
+          if (sourceType === 'emr') {
+            response = `根据《${item.title}》的数据分析，高血压患者常见的并发症包括冠心病、心力衰竭、脑卒中、肾功能不全等。数据显示，血压控制不良的患者并发症发生率显著高于血压控制良好的患者。`;
+            citations = "引用自电子病历分析结果";
+          } else {
+            response = `高血压是心脑血管疾病的主要危险因素，长期血压升高可导致心、脑、肾等靶器官损害。常见并发症包括冠心病、心力衰竭、脑卒中、肾功能不全等。良好控制血压可显著降低并发症风险。`;
+          }
         } else {
-          response = `关于"${this.selectedPaper.title}"，您的问题涉及到的内容可能需要更深入地分析论文。该论文由${this.selectedPaper.authors.join(', ')}在${this.selectedPaper.year}年发表，已被引用${this.selectedPaper.citations_count || 0}次，是${this.selectedPaper.title.includes('Diffusion') ? '扩散模型' : '图像生成'}领域的重要研究。建议您查阅原论文以获取更详细信息。`;
+          response = `关于"${item.title}"中的${question}，这是一个很好的问题。作为一份${this.getSourceTypeName(sourceType)}资料，它提供了关于高血压的重要信息。建议您查阅原文以获取更详细的内容，或者尝试提问更具体的问题，如高血压的诊断标准、治疗方法或并发症等。`;
         }
       }
       
@@ -155,13 +180,30 @@ export default {
       if (container) {
         container.scrollTop = container.scrollHeight;
       }
+    },
+    
+    getSourceTypeName(type) {
+      const sourceTypes = {
+        'textbook': '教材',
+        'paper': '论文',
+        'emr': '电子病历',
+        'guideline': '临床指南'
+      };
+      return sourceTypes[type] || '未知来源';
+    },
+    
+    highlightText(text) {
+      if (!text || !this.searchQuery) return text;
+      
+      const regex = new RegExp(`(${this.searchQuery})`, 'gi');
+      return text.replace(regex, '<span class="highlight-text">$1</span>');
     }
   },
   mounted() {
     // 页面加载时显示欢迎消息
     this.conversations.push({
       role: 'assistant',
-      content: '欢迎使用论文知识问答系统！请选择左侧论文或在知识图谱中点击节点，然后提问关于论文的问题。'
+      content: '欢迎使用医学知识问答系统！请选择左侧资料或在知识图谱中点击节点，然后提问相关问题。'
     });
   }
 }
@@ -189,7 +231,7 @@ export default {
   margin-bottom: 0.5rem;
 }
 
-.current-paper {
+.current-item {
   font-size: 0.8rem;
   color: #666;
   white-space: nowrap;
@@ -197,7 +239,7 @@ export default {
   text-overflow: ellipsis;
 }
 
-.current-paper span {
+.current-item span {
   font-weight: 500;
   color: #2a7d8b;
 }
@@ -340,5 +382,13 @@ export default {
 .qa-send-button:disabled {
   background-color: #aaa;
   cursor: not-allowed;
+}
+
+:deep(.highlight-text) {
+  background-color: #ffecb3;
+  color: #e65100;
+  font-weight: bold;
+  padding: 0 2px;
+  border-radius: 2px;
 }
 </style> 
