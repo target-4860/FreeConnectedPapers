@@ -1,5 +1,5 @@
 <template>
-  <div class="data-source-panel">
+  <div class="data-source-panel" :class="{'expanded': isExpanded}">
     <div class="panel-header">
       <h2>数据来源</h2>
     </div>
@@ -30,6 +30,54 @@
             <span class="item-year" v-if="item.year">{{ item.year }}</span>
           </div>
           <div class="item-authors" v-if="item.authors">{{ formatAuthors(item.authors) }}</div>
+          
+          <!-- 扩展模式下显示的额外信息 -->
+          <div v-if="isExpanded" class="item-details">
+            <!-- 关键词 -->
+            <div v-if="item.keywords && item.keywords.length" class="item-keywords">
+              <strong>关键词:</strong>
+              <span 
+                v-for="(keyword, idx) in item.keywords" 
+                :key="idx" 
+                class="keyword-tag"
+                :class="{ 'highlight': isSearchKeyword(keyword) }"
+              >
+                {{ keyword }}
+              </span>
+            </div>
+            
+            <!-- 摘要/简介 -->
+            <div v-if="item.abstract || item.summary" class="item-abstract">
+              <strong>摘要:</strong>
+              <p v-html="highlightText(item.abstract || item.summary)"></p>
+            </div>
+            
+            <!-- 教材章节预览 -->
+            <div v-if="item.sections && item.sections.length" class="item-section-preview">
+              <strong>相关章节:</strong>
+              <p>{{ item.sections[0].title }}</p>
+            </div>
+            
+            <!-- 临床指南建议预览 -->
+            <div v-if="item.recommendations && item.recommendations.length" class="item-recommendations">
+              <strong>主要建议:</strong>
+              <p v-html="highlightText(item.recommendations[0])"></p>
+              <span v-if="item.recommendations.length > 1" class="more-link">更多建议...</span>
+            </div>
+            
+            <!-- 其他元数据 -->
+            <div class="item-metadata">
+              <span v-if="item.publisher"><strong>出版社:</strong> {{ item.publisher }}</span>
+              <span v-if="item.journal"><strong>期刊:</strong> {{ item.journal }}</span>
+              <span v-if="item.hospital"><strong>医院:</strong> {{ item.hospital }}</span>
+              <span v-if="item.organization"><strong>组织:</strong> {{ item.organization }}</span>
+              <span v-if="item.citations_count"><strong>引用数:</strong> {{ item.citations_count }}</span>
+            </div>
+            
+            <div class="view-details-button">
+              <button @click.stop="viewFullDetails(item)">查看完整详情</button>
+            </div>
+          </div>
         </div>
       </template>
       
@@ -41,6 +89,8 @@
 </template>
 
 <script>
+import { loadAllData, searchData } from '../services/DataService';
+
 export default {
   name: 'DataSourcePanel',
   props: {
@@ -51,6 +101,10 @@ export default {
     selectedItem: {
       type: Object,
       default: null
+    },
+    isExpanded: {
+      type: Boolean,
+      default: false
     }
   },
   data() {
@@ -63,7 +117,9 @@ export default {
         { type: 'emr', name: '电子病历', count: 0 },
         { type: 'guideline', name: '临床指南', count: 0 }
       ],
-      items: []
+      items: [],
+      allItems: [], // 存储所有加载的数据
+      isLoading: false
     }
   },
   computed: {
@@ -83,6 +139,10 @@ export default {
       this.$emit('select-item', item);
     },
     
+    viewFullDetails(item) {
+      this.$emit('select-item', item);
+    },
+    
     formatAuthors(authors) {
       if (!authors || authors.length === 0) return '';
       if (authors.length === 1) return authors[0];
@@ -92,6 +152,18 @@ export default {
     getSourceTypeName(type) {
       const source = this.dataSources.find(s => s.type === type);
       return source ? source.name : '';
+    },
+    
+    isSearchKeyword(keyword) {
+      if (!this.searchQuery) return false;
+      return keyword.toLowerCase().includes(this.searchQuery.toLowerCase());
+    },
+    
+    highlightText(text) {
+      if (!text || !this.searchQuery) return text;
+      
+      const regex = new RegExp(`(${this.searchQuery})`, 'gi');
+      return text.replace(regex, '<span class="highlight-text">$1</span>');
     },
     
     updateSourceCounts() {
@@ -105,112 +177,62 @@ export default {
       });
     },
     
+    async loadAllDataFromServer() {
+      this.isLoading = true;
+      try {
+        // 加载所有数据
+        this.allItems = await loadAllData();
+        console.log('加载了 ' + this.allItems.length + ' 条数据');
+        
+        // 如果有搜索查询，则过滤数据
+        if (this.searchQuery) {
+          this.items = searchData(this.allItems, this.searchQuery);
+        } else {
+          this.items = this.allItems;
+        }
+        
+        this.updateSourceCounts();
+        
+        // 如果有结果，默认选中第一个 - 注释掉自动选择
+        /*if (this.items.length > 0) {
+          this.$emit('select-item', this.items[0]);
+        }*/
+      } catch (error) {
+        console.error('加载数据失败:', error);
+        this.items = [];
+      } finally {
+        this.isLoading = false;
+      }
+    },
+    
     loadItems(query) {
-      // 这里应该调用API获取搜索结果
-      // 模拟API调用
       this.isLoading = true;
       
-      setTimeout(() => {
-        // 示例数据
-        this.items = this.generateSampleData(query);
+      // 如果已经加载了所有数据，则直接从内存中过滤
+      if (this.allItems.length > 0) {
+        this.items = searchData(this.allItems, query);
         this.updateSourceCounts();
         this.isLoading = false;
         
-        // 如果有结果，默认选中第一个
-        if (this.items.length > 0) {
+        // 如果有结果，默认选中第一个 - 注释掉自动选择
+        /*if (this.items.length > 0) {
           this.$emit('select-item', this.items[0]);
-        }
-      }, 500);
-    },
-    
-    generateSampleData(query) {
-      // 生成示例数据
-      const sampleData = [
-        {
-          id: 1,
-          title: '内科学（第9版）',
-          sourceType: 'textbook',
-          authors: ['葛均波', '徐永健'],
-          year: 2018,
-          publisher: '人民卫生出版社',
-          keywords: ['高血压', '糖尿病', '心血管疾病'],
-          sections: [
-            {
-              title: '第5章 高血压',
-              content: `高血压是常见的慢性病，是心脑血管疾病的主要危险因素。随着人口老龄化，高血压的患病率逐年升高。高血压是以体循环动脉压增高为主要特征的临床综合征，可伴有心、脑、肾等器官的功能或器质性损害。`
-            }
-          ]
-        },
-        {
-          id: 2,
-          title: 'Hypertension Management in 2023: A Comprehensive Review',
-          sourceType: 'paper',
-          authors: ['Smith J', 'Johnson R', 'Williams T'],
-          year: 2023,
-          journal: 'Journal of Hypertension',
-          keywords: ['高血压', '治疗', '管理'],
-          abstract: '本文综述了高血压管理的最新进展，包括诊断标准、药物治疗和生活方式干预。'
-        },
-        {
-          id: 3,
-          title: '某三甲医院高血压患者电子病历分析',
-          sourceType: 'emr',
-          year: 2022,
-          hospital: '北京协和医院',
-          patientCount: 500,
-          keywords: ['高血压', '并发症', '治疗效果'],
-          summary: '本研究分析了500例高血压患者的电子病历数据，探讨了不同治疗方案的效果比较。'
-        },
-        {
-          id: 4,
-          title: '中国高血压防治指南（2023年修订版）',
-          sourceType: 'guideline',
-          authors: ['中国高血压联盟', '中华医学会心血管病学分会'],
-          year: 2023,
-          organization: '中国高血压联盟',
-          keywords: ['高血压', '诊断', '治疗', '随访'],
-          recommendations: [
-            '建议所有成人定期测量血压',
-            '对于一级高血压患者，建议首先进行生活方式干预'
-          ]
-        },
-        {
-          id: 5,
-          title: '病理生理学（第3版）',
-          sourceType: 'textbook',
-          authors: ['王建枝', '殷莲华'],
-          year: 2020,
-          publisher: '高等教育出版社',
-          keywords: ['高血压', '病理机制', '肾素-血管紧张素系统'],
-          sections: [
-            {
-              title: '第7章 高血压的病理生理学',
-              content: `高血压的发病机制复杂，包括肾素-血管紧张素-醛固酮系统激活、交感神经系统功能亢进、血管内皮功能障碍等多种因素。`
-            }
-          ]
-        }
-      ];
-      
-      // 根据查询词过滤
-      if (query) {
-        const lowerQuery = query.toLowerCase();
-        return sampleData.filter(item => 
-          item.title.toLowerCase().includes(lowerQuery) || 
-          (item.keywords && item.keywords.some(k => k.toLowerCase().includes(lowerQuery)))
-        );
+        }*/
+      } else {
+        // 否则先加载所有数据
+        this.loadAllDataFromServer();
       }
-      
-      return sampleData;
     }
+  },
+  mounted() {
+    // 组件挂载时加载所有数据
+    this.loadAllDataFromServer();
   },
   watch: {
     searchQuery: {
       handler(newQuery) {
-        if (newQuery) {
-          this.loadItems(newQuery);
-        }
-      },
-      immediate: true
+        this.loadItems(newQuery);
+      }
     }
   }
 }
@@ -222,6 +244,10 @@ export default {
   flex-direction: column;
   height: 100%;
   background-color: #fafafa;
+}
+
+.data-source-panel.expanded .source-item {
+  padding: 1.5rem;
 }
 
 .panel-header {
@@ -241,6 +267,7 @@ export default {
   display: flex;
   border-bottom: 1px solid #e0e0e0;
   background-color: #f5f5f5;
+  flex-wrap: wrap;
 }
 
 .source-tab {
@@ -326,5 +353,88 @@ export default {
   text-align: center;
   color: #888;
   font-style: italic;
+}
+
+/* 扩展模式下的额外样式 */
+.item-details {
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px dashed #ddd;
+}
+
+.item-keywords {
+  margin-bottom: 0.8rem;
+}
+
+.keyword-tag {
+  display: inline-block;
+  margin: 0.2rem;
+  padding: 0.2rem 0.5rem;
+  background-color: #f0f0f0;
+  border-radius: 12px;
+  font-size: 0.8rem;
+  color: #555;
+}
+
+.keyword-tag.highlight {
+  background-color: #ffecb3;
+  color: #e65100;
+  font-weight: 500;
+}
+
+.item-abstract, .item-section-preview, .item-recommendations {
+  margin-bottom: 0.8rem;
+  font-size: 0.9rem;
+  line-height: 1.5;
+}
+
+.item-abstract p, .item-section-preview p, .item-recommendations p {
+  margin-top: 0.3rem;
+  color: #555;
+}
+
+.item-metadata {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.8rem;
+  margin-bottom: 0.8rem;
+  font-size: 0.85rem;
+  color: #666;
+}
+
+.more-link {
+  color: #2a7d8b;
+  font-size: 0.8rem;
+  cursor: pointer;
+  display: block;
+  margin-top: 0.3rem;
+}
+
+.view-details-button {
+  margin-top: 1rem;
+  text-align: right;
+}
+
+.view-details-button button {
+  padding: 0.4rem 0.8rem;
+  background-color: #2a7d8b;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  font-size: 0.85rem;
+  cursor: pointer;
+  transition: background-color 0.2s;
+}
+
+.view-details-button button:hover {
+  background-color: #1a6575;
+}
+
+:deep(.highlight-text) {
+  background-color: #ffecb3;
+  color: #e65100;
+  font-weight: bold;
+  padding: 0 2px;
+  border-radius: 2px;
 }
 </style> 
