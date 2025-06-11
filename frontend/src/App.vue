@@ -24,21 +24,30 @@
     </header>
 
     <!-- 主要内容区 -->
-    <main class="main-content">
+    <main class="main-content" :class="{'graph-hidden': !graphVisible}">
       <!-- 左侧数据来源面板 -->
       <DataSourcePanel 
         :searchQuery="searchQuery" 
         :selectedItem="selectedItem" 
         @select-item="selectItem" 
-        class="data-source-container" 
+        :class="['data-source-container', {'expanded': !graphVisible}]" 
+        :isExpanded="!graphVisible"
       />
+
+      <!-- 知识图谱显示/隐藏按钮 -->
+      <div class="graph-toggle-btn">
+        <button @click="toggleGraphVisibility" class="toggle-button">
+          {{ graphVisible ? '隐藏知识图谱' : '显示知识图谱' }}
+        </button>
+      </div>
 
       <!-- 中间知识图谱 -->
       <KnowledgeGraph 
         :papers="items"
         :selectedPaper="selectedItem"
         @search-term="handleGraphSearch"
-        class="knowledge-graph-container" 
+        class="knowledge-graph-container"
+        v-model:isVisible="graphVisible"
       />
 
       <!-- 右侧问答区域 -->
@@ -55,6 +64,7 @@
       :item="selectedItem"
       :searchQuery="searchQuery"
       @close="closeDetailModal"
+      @search-keyword="handleKeywordSearch"
     />
   </div>
 </template>
@@ -79,7 +89,8 @@ export default {
       items: [],
       selectedItem: null,
       isLoading: false,
-      showDetailModal: false
+      showDetailModal: false,
+      graphVisible: false // 控制知识图谱是否可见
     }
   },
   methods: {
@@ -87,13 +98,26 @@ export default {
       if (!this.searchQuery.trim()) return;
       
       this.isLoading = true;
-      // 模拟API调用
-      setTimeout(() => {
-        // 示例数据
-        this.items = this.generateSampleData();
-        this.selectedItem = this.items[0]; // 默认选中第一篇
-        this.isLoading = false;
-      }, 1000);
+      
+      // 从数据服务加载实际数据，替换模拟数据
+      import('./services/DataService').then(({ loadAllData, searchData }) => {
+        loadAllData().then(allData => {
+          // 使用搜索词过滤数据
+          this.items = searchData(allData, this.searchQuery);
+          if (this.items.length > 0) {
+            this.selectedItem = this.items[0]; // 默认选中第一篇
+          }
+          this.isLoading = false;
+          
+          // 如果查询结果不为空且图谱不可见，则显示图谱
+          if (this.items.length > 0 && !this.graphVisible) {
+            this.graphVisible = true;
+          }
+        }).catch(error => {
+          console.error('加载数据失败:', error);
+          this.isLoading = false;
+        });
+      });
     },
     
     selectItem(item) {
@@ -110,123 +134,14 @@ export default {
       this.handleSearch();
     },
     
-    generateSampleData() {
-      // 生成示例论文数据
-      return [
-        { 
-          id: 1, 
-          title: '高血压诊断与治疗指南',
-          authors: ['中国高血压联盟', '中华医学会心血管病学分会'],
-          year: 2022,
-          citations_count: 3507,
-          sourceType: 'guideline',
-          references: [2, 3, 5, 8],
-          keywords: ['高血压', '诊断', '治疗', '随访'],
-          recommendations: [
-            '建议所有成人定期测量血压',
-            '对于一级高血压患者，建议首先进行生活方式干预'
-          ]
-        },
-        { 
-          id: 2, 
-          title: '内科学（第9版）',
-          authors: ['葛均波', '徐永健'],
-          year: 2018,
-          citations_count: 2250,
-          sourceType: 'textbook',
-          references: [1, 3, 4],
-          publisher: '人民卫生出版社',
-          keywords: ['高血压', '糖尿病', '心血管疾病'],
-          sections: [
-            {
-              title: '第5章 高血压',
-              content: `高血压是常见的慢性病，是心脑血管疾病的主要危险因素。随着人口老龄化，高血压的患病率逐年升高。高血压是以体循环动脉压增高为主要特征的临床综合征，可伴有心、脑、肾等器官的功能或器质性损害。`
-            }
-          ]
-        },
-        { 
-          id: 3, 
-          title: 'Hypertension Management in 2023: A Comprehensive Review',
-          authors: ['Smith J', 'Johnson R', 'Williams T'],
-          year: 2023,
-          citations_count: 1820,
-          sourceType: 'paper',
-          references: [1, 2, 5],
-          journal: 'Journal of Hypertension',
-          keywords: ['高血压', '治疗', '管理'],
-          abstract: '本文综述了高血压管理的最新进展，包括诊断标准、药物治疗和生活方式干预。'
-        },
-        { 
-          id: 4, 
-          title: '某三甲医院高血压患者电子病历分析',
-          authors: ['张医生', '李医生'],
-          year: 2022,
-          citations_count: 1950,
-          sourceType: 'emr',
-          references: [1, 2, 3, 5],
-          hospital: '北京协和医院',
-          patientCount: 500,
-          keywords: ['高血压', '并发症', '治疗效果'],
-          summary: '本研究分析了500例高血压患者的电子病历数据，探讨了不同治疗方案的效果比较。'
-        },
-        { 
-          id: 5, 
-          title: '病理生理学（第3版）',
-          authors: ['王建枝', '殷莲华'],
-          year: 2020,
-          citations_count: 1750,
-          sourceType: 'textbook',
-          references: [2, 4, 8],
-          publisher: '高等教育出版社',
-          keywords: ['高血压', '病理机制', '肾素-血管紧张素系统'],
-          sections: [
-            {
-              title: '第7章 高血压的病理生理学',
-              content: `高血压的发病机制复杂，包括肾素-血管紧张素-醛固酮系统激活、交感神经系统功能亢进、血管内皮功能障碍等多种因素。`
-            }
-          ]
-        },
-        { 
-          id: 6, 
-          title: '高血压与脑卒中相关性研究',
-          authors: ['刘研究', '王学者'],
-          year: 2021,
-          citations_count: 1670,
-          sourceType: 'paper',
-          references: [1, 2, 3],
-          journal: '中华医学杂志',
-          keywords: ['高血压', '脑卒中', '风险因素'],
-          abstract: '本研究探讨了高血压与脑卒中发生风险的相关性，分析了不同血压水平对脑卒中风险的影响。'
-        },
-        { 
-          id: 7, 
-          title: '高血压合并糖尿病患者临床特点分析',
-          authors: ['赵医生'],
-          year: 2022,
-          citations_count: 980,
-          sourceType: 'emr',
-          references: [1, 3, 5],
-          hospital: '上海第一人民医院',
-          patientCount: 350,
-          keywords: ['高血压', '糖尿病', '并发症'],
-          summary: '本研究分析了350例高血压合并糖尿病患者的临床特点，探讨了两种疾病的相互影响及治疗策略。'
-        },
-        { 
-          id: 8, 
-          title: '中国高血压流行病学调查报告',
-          authors: ['中国疾病预防控制中心', '国家心血管病中心'],
-          year: 2020,
-          citations_count: 2430,
-          sourceType: 'guideline',
-          references: [5],
-          organization: '中国疾病预防控制中心',
-          keywords: ['高血压', '流行病学', '患病率', '知晓率'],
-          recommendations: [
-            '加强高血压防治知识的宣传教育',
-            '推广健康生活方式，减少高血压发病风险'
-          ]
-        }
-      ];
+    handleKeywordSearch(keyword) {
+      this.searchQuery = keyword;
+      this.handleSearch();
+      this.showDetailModal = false; // 关闭详情弹窗
+    },
+    
+    toggleGraphVisibility() {
+      this.graphVisible = !this.graphVisible;
     }
   },
   mounted() {
@@ -318,6 +233,7 @@ body {
   display: flex;
   flex: 1;
   overflow: hidden;
+  position: relative; /* 添加相对定位，用于绝对定位切换按钮 */
 }
 
 .data-source-container {
@@ -325,12 +241,26 @@ body {
   overflow-y: auto;
   border-right: 1px solid #eee;
   background-color: white;
+  transition: width 0.3s ease;
+}
+
+.data-source-container.expanded {
+  width: 75%; /* 当知识图谱隐藏时，数据源面板扩展到75% */
 }
 
 .knowledge-graph-container {
   width: 50%;
   overflow: hidden;
   position: relative;
+  transition: width 0.3s ease;
+}
+
+/* 当知识图谱隐藏时，宽度变为0 */
+.main-content.graph-hidden .knowledge-graph-container {
+  width: 0;
+  padding: 0;
+  margin: 0;
+  border: none;
 }
 
 .qa-panel-container {
@@ -338,5 +268,30 @@ body {
   overflow-y: auto;
   border-left: 1px solid #eee;
   background-color: white;
+}
+
+/* 知识图谱显示/隐藏按钮样式 */
+.graph-toggle-btn {
+  position: absolute;
+  top: 20px; /* 调整位置，与数据来源标题对齐 */
+  left: 50%; /* 放在左侧数据面板右侧 */
+  z-index: 100;
+  padding: 0.5rem;
+}
+
+.toggle-button {
+  padding: 0.6rem 1.2rem;
+  background-color: #2a7d8b;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  font-size: 0.9rem;
+  cursor: pointer;
+  transition: background-color 0.2s;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+}
+
+.toggle-button:hover {
+  background-color: #1a6575;
 }
 </style> 
