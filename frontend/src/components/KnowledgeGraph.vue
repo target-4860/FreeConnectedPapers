@@ -1,12 +1,5 @@
 <template>
   <div class="knowledge-graph-wrapper">
-    <!-- 知识图谱按钮 -->
-    <div class="graph-toggle-container">
-      <button @click="toggleGraphVisibility" class="toggle-button">
-        {{ isVisible ? '隐藏知识图谱' : '显示知识图谱' }}
-      </button>
-    </div>
-    
     <div class="knowledge-graph" v-if="isVisible">
       <div class="graph-controls">
         <button @click="resetGraph" class="control-button">
@@ -15,6 +8,27 @@
         <button @click="centerGraph" class="control-button">
           居中
         </button>
+      </div>
+      
+      <!-- 添加图例 -->
+      <div class="graph-legend">
+        <div class="legend-title">数据类型</div>
+        <div class="legend-item">
+          <div class="legend-color" style="background-color: #4CAF50;"></div>
+          <div class="legend-label">教材</div>
+        </div>
+        <div class="legend-item">
+          <div class="legend-color" style="background-color: #2196F3;"></div>
+          <div class="legend-label">论文</div>
+        </div>
+        <div class="legend-item">
+          <div class="legend-color" style="background-color: #FF9800;"></div>
+          <div class="legend-label">电子病历</div>
+        </div>
+        <div class="legend-item">
+          <div class="legend-color" style="background-color: #9C27B0;"></div>
+          <div class="legend-label">临床指南</div>
+        </div>
       </div>
       
       <div class="loading-overlay" v-if="isLoading">
@@ -40,8 +54,13 @@ export default {
     selectedPaper: {
       type: Object,
       default: null
+    },
+    isVisible: {
+      type: Boolean,
+      default: false
     }
   },
+  emits: ['search-term', 'update:isVisible'],
   data() {
     return {
       simulation: null,
@@ -51,7 +70,6 @@ export default {
       nodes: [],
       links: [],
       isLoading: false,
-      isVisible: false, // 默认隐藏知识图谱
       transform: {
         x: 0,
         y: 0,
@@ -93,29 +111,37 @@ export default {
     }
   },
   methods: {
-    toggleGraphVisibility() {
-      this.isVisible = !this.isVisible;
-    },
-    
     generateGraphData() {
+      // 对数据进行抽样：如果超过50条数据，随机抽取50条
+      let sampledPapers = [...this.papers];
+      
+      if (sampledPapers.length > 50) {
+        console.log(`数据总量为 ${sampledPapers.length} 条，进行随机抽样选取50条`);
+        sampledPapers = this.randomSample(sampledPapers, 50);
+      } else {
+        console.log(`数据总量为 ${sampledPapers.length} 条，使用全部数据`);
+      }
+      
       // 生成节点数据
-      this.nodes = this.papers.map(paper => ({
+      this.nodes = sampledPapers.map(paper => ({
         id: paper.id,
         title: paper.title,
         authors: paper.authors,
         year: paper.year,
         citations: paper.citations_count || 0,
         r: this.calculateRadius(paper.citations_count || 0),
-        keywords: paper.keywords || []
+        keywords: paper.keywords || [],
+        sourceType: paper.sourceType // 添加数据源类型
       }));
       
       // 生成连接数据
       this.links = [];
-      this.papers.forEach(paper => {
+      sampledPapers.forEach(paper => {
         if (paper.references && paper.references.length) {
           paper.references.forEach(refId => {
-            // 检查引用的论文是否在我们的数据集中
-            if (this.papers.some(p => p.id === refId)) {
+            // 检查引用的论文是否在我们的抽样数据集中
+            const targetPaper = sampledPapers.find(p => p.id === refId);
+            if (targetPaper) {
               this.links.push({
                 source: paper.id,
                 target: refId,
@@ -125,6 +151,105 @@ export default {
           });
         }
       });
+      
+      // 确保所有节点都连接起来，形成一个统一的网络
+      
+      // 第一步：基于关键词连接节点
+      const nodesByKeyword = {};
+      this.nodes.forEach(node => {
+        if (node.keywords && node.keywords.length) {
+          node.keywords.forEach(keyword => {
+            if (!nodesByKeyword[keyword]) {
+              nodesByKeyword[keyword] = [];
+            }
+            nodesByKeyword[keyword].push(node);
+          });
+        }
+      });
+      
+      // 为共享同一关键词的节点创建连接
+      Object.values(nodesByKeyword).forEach(keywordNodes => {
+        if (keywordNodes.length > 1) {
+          for (let i = 0; i < keywordNodes.length - 1; i++) {
+            for (let j = i + 1; j < keywordNodes.length; j++) {
+              // 检查是否已存在连接
+              const exists = this.links.some(
+                link => (link.source === keywordNodes[i].id && link.target === keywordNodes[j].id) ||
+                        (link.source === keywordNodes[j].id && link.target === keywordNodes[i].id)
+              );
+              
+              if (!exists) {
+                this.links.push({
+                  source: keywordNodes[i].id,
+                  target: keywordNodes[j].id,
+                  value: 0.7 // 中等强度的连接
+                });
+              }
+            }
+          }
+        }
+      });
+      
+      // 第二步：基于数据源类型连接节点
+      const nodesByType = {};
+      this.nodes.forEach(node => {
+        if (!nodesByType[node.sourceType]) {
+          nodesByType[node.sourceType] = [];
+        }
+        nodesByType[node.sourceType].push(node);
+      });
+      
+      // 为每种类型内的节点创建连接
+      Object.values(nodesByType).forEach(typeNodes => {
+        if (typeNodes.length > 1) {
+          // 创建类型内部连接 - 环形结构
+          for (let i = 0; i < typeNodes.length; i++) {
+            const nextIndex = (i + 1) % typeNodes.length; // 循环连接
+            
+            // 检查是否已存在连接
+            const exists = this.links.some(
+              link => (link.source === typeNodes[i].id && link.target === typeNodes[nextIndex].id) ||
+                      (link.source === typeNodes[nextIndex].id && link.target === typeNodes[i].id)
+            );
+            
+            if (!exists) {
+              this.links.push({
+                source: typeNodes[i].id,
+                target: typeNodes[nextIndex].id,
+                value: 0.5 // 较弱的连接
+              });
+            }
+          }
+        }
+      });
+      
+      // 第三步：检查是否有孤立的节点组，如果有，则将它们连接到主网络
+      const connectedGroups = this.findConnectedGroups();
+      
+      if (connectedGroups.length > 1) {
+        // 按组大小排序（从大到小）
+        connectedGroups.sort((a, b) => b.length - a.length);
+        
+        // 最大的组被视为主网络
+        const mainGroup = connectedGroups[0];
+        
+        // 将其他组连接到主网络
+        for (let i = 1; i < connectedGroups.length; i++) {
+          const group = connectedGroups[i];
+          
+          // 从每个组中选择一个节点连接到主网络
+          const sourceNode = group[0];
+          const targetNode = mainGroup[0];
+          
+          this.links.push({
+            source: sourceNode,
+            target: targetNode,
+            value: 0.3 // 弱连接
+          });
+        }
+      }
+      
+      console.log(`生成了 ${this.nodes.length} 个节点和 ${this.links.length} 条连接，连接组数: ${this.findConnectedGroups().length}`);
     },
     
     calculateRadius(citations) {
@@ -132,17 +257,66 @@ export default {
       return Math.max(Math.min(Math.log(citations + 1) * 4 + 10, 25), 10);
     },
     
-    getNodeColor(year) {
-      // 根据年份分配颜色
+    getNodeColor(sourceType, year) {
+      // 根据数据源类型和年份分配颜色
       const currentYear = new Date().getFullYear();
       const yearsAgo = currentYear - year;
       
-      // 颜色范围从浅色（新）到深色（旧）
-      if (yearsAgo <= 1) return "#60b3c2"; // 最新
-      if (yearsAgo <= 3) return "#3c8b9c";
-      if (yearsAgo <= 5) return "#2a7d8b";
-      if (yearsAgo <= 10) return "#1a6575";
-      return "#0d4e5d"; // 最旧
+      // 为不同数据源类型定义基础颜色
+      let baseColor;
+      switch(sourceType) {
+        case 'textbook':
+          baseColor = "#4CAF50"; // 教材 - 绿色
+          break;
+        case 'paper':
+          baseColor = "#2196F3"; // 论文 - 蓝色
+          break;
+        case 'emr':
+          baseColor = "#FF9800"; // 电子病历 - 橙色
+          break;
+        case 'guideline':
+          baseColor = "#9C27B0"; // 临床指南 - 紫色
+          break;
+        default:
+          baseColor = "#607D8B"; // 默认 - 灰色
+      }
+      
+      // 根据年份调整颜色深浅
+      if (yearsAgo <= 1) return this.adjustColorBrightness(baseColor, 40); // 最新 - 最亮
+      if (yearsAgo <= 3) return this.adjustColorBrightness(baseColor, 20);
+      if (yearsAgo <= 5) return baseColor; // 原始颜色
+      if (yearsAgo <= 10) return this.adjustColorBrightness(baseColor, -20);
+      return this.adjustColorBrightness(baseColor, -40); // 最旧 - 最暗
+    },
+    
+    // 辅助函数：调整颜色亮度
+    adjustColorBrightness(hex, percent) {
+      // 将十六进制颜色转换为RGB
+      let r = parseInt(hex.substring(1, 3), 16);
+      let g = parseInt(hex.substring(3, 5), 16);
+      let b = parseInt(hex.substring(5, 7), 16);
+      
+      // 应用亮度调整
+      r = Math.max(0, Math.min(255, r + percent));
+      g = Math.max(0, Math.min(255, g + percent));
+      b = Math.max(0, Math.min(255, b + percent));
+      
+      // 转回十六进制格式
+      return "#" + 
+        ((1 << 24) + (r << 16) + (g << 8) + b)
+          .toString(16)
+          .slice(1);
+    },
+    
+    getSourceTypeName(sourceType) {
+      // 获取数据源类型的中文名称
+      const sourceTypes = {
+        'textbook': '教材',
+        'paper': '论文',
+        'emr': '电子病历',
+        'guideline': '临床指南'
+      };
+      return sourceTypes[sourceType] || sourceType;
     },
     
     initializeGraph() {
@@ -177,10 +351,10 @@ export default {
       
       // 创建力导向图
       this.simulation = d3.forceSimulation(this.nodes)
-        .force("link", d3.forceLink(this.links).id(d => d.id).distance(100))
-        .force("charge", d3.forceManyBody().strength(-300))
+        .force("link", d3.forceLink(this.links).id(d => d.id).distance(150))
+        .force("charge", d3.forceManyBody().strength(-400))
         .force("center", d3.forceCenter(this.width / 2, this.height / 2))
-        .force("collide", d3.forceCollide().radius(d => d.r + 10));
+        .force("collide", d3.forceCollide().radius(d => d.r + 20));
       
       // 绘制连接线
       const link = g.append("g")
@@ -189,7 +363,7 @@ export default {
         .selectAll("line")
         .data(this.links)
         .join("line")
-        .attr("stroke-width", d => Math.sqrt(d.value));
+        .attr("stroke-width", d => Math.sqrt(d.value) * 1.5);
       
       // 绘制节点
       const node = g.append("g")
@@ -199,10 +373,10 @@ export default {
         .attr("class", "node")
         .call(this.drag(this.simulation));
       
-      // 节点圆形
+      // 使用纯色圆形节点，根据数据源类型设置不同颜色
       node.append("circle")
         .attr("r", d => d.r)
-        .attr("fill", d => this.getNodeColor(d.year))
+        .attr("fill", d => this.getNodeColor(d.sourceType, d.year))
         .attr("stroke", "#fff")
         .attr("stroke-width", 1.5)
         .on("click", (event, d) => {
@@ -220,7 +394,7 @@ export default {
       
       // 添加悬停提示
       node.append("title")
-        .text(d => `${d.title}\n作者: ${d.authors ? d.authors.join(", ") : "未知"}\n年份: ${d.year || "未知"}\n引用数: ${d.citations || 0}\n点击可搜索相关内容`);
+        .text(d => `${d.title}\n类型: ${this.getSourceTypeName(d.sourceType)}\n作者: ${d.authors ? d.authors.join(", ") : "未知"}\n年份: ${d.year || "未知"}\n引用数: ${d.citations || 0}\n点击可搜索相关内容`);
       
       // 更新力导向图
       this.simulation.on("tick", () => {
@@ -284,10 +458,6 @@ export default {
     resetGraph() {
       if (!this.svg) return;
       
-      const container = this.$refs.graphContainer;
-      const width = container.clientWidth;
-      const height = container.clientHeight;
-      
       // 重置缩放和平移
       this.svg.transition()
         .duration(750)
@@ -346,6 +516,121 @@ export default {
       
       // 触发搜索事件
       this.$emit('search-term', searchTerm);
+    },
+    
+    // 辅助方法：查找连接的节点组
+    findConnectedGroups() {
+      const nodeIds = this.nodes.map(n => n.id);
+      const visited = {};
+      const groups = [];
+      
+      // 深度优先搜索找出连接的组件
+      const dfs = (nodeId, group) => {
+        visited[nodeId] = true;
+        group.push(nodeId);
+        
+        // 查找所有与该节点相连的节点
+        this.links.forEach(link => {
+          const nextId = link.source === nodeId ? link.target : 
+                         link.target === nodeId ? link.source : null;
+          
+          if (nextId !== null && !visited[nextId]) {
+            dfs(nextId, group);
+          }
+        });
+      };
+      
+      // 对每个未访问的节点进行DFS
+      nodeIds.forEach(id => {
+        if (!visited[id]) {
+          const group = [];
+          dfs(id, group);
+          groups.push(group);
+        }
+      });
+      
+      return groups;
+    },
+    
+    // 随机抽样方法
+    randomSample(array, sampleSize) {
+      // Fisher-Yates 洗牌算法
+      const shuffled = [...array];
+      let i = array.length;
+      while (i--) {
+        const index = Math.floor(Math.random() * (i + 1));
+        [shuffled[index], shuffled[i]] = [shuffled[i], shuffled[index]];
+      }
+      
+      // 智能抽样：保证各类型数据都有代表
+      const byType = {};
+      shuffled.forEach(item => {
+        if (!byType[item.sourceType]) {
+          byType[item.sourceType] = [];
+        }
+        byType[item.sourceType].push(item);
+      });
+      
+      // 结果数组
+      const result = [];
+      
+      // 确保每种类型至少有一个代表
+      Object.values(byType).forEach(items => {
+        if (items.length > 0) {
+          result.push(items[0]);
+        }
+      });
+      
+      // 计算各类型在原始数据中的比例
+      const typeProportions = {};
+      let totalItems = 0;
+      Object.entries(byType).forEach(([type, items]) => {
+        totalItems += items.length;
+        typeProportions[type] = items.length;
+      });
+      
+      // 按比例分配剩余配额
+      if (result.length < sampleSize) {
+        const remaining = sampleSize - result.length;
+        let allocated = 0;
+        Object.entries(typeProportions).forEach(([type, count], index) => {
+          // 最后一种类型分配所有剩余配额
+          if (index === Object.keys(typeProportions).length - 1) {
+            const toAllocate = remaining - allocated;
+            if (toAllocate > 0 && byType[type].length > 1) {
+              result.push(...byType[type].slice(1, 1 + toAllocate));
+            }
+          } else {
+            const proportion = count / totalItems;
+            const toAllocate = Math.min(
+              Math.max(1, Math.floor(proportion * remaining)),
+              byType[type].length - 1
+            );
+            
+            if (toAllocate > 0) {
+              result.push(...byType[type].slice(1, 1 + toAllocate));
+              allocated += toAllocate;
+            }
+          }
+        });
+      }
+      
+      // 如果配额分配后还不足，用随机数据补足
+      if (result.length < sampleSize) {
+        const usedIds = new Set(result.map(item => item.id));
+        const remainingItems = shuffled.filter(item => !usedIds.has(item.id));
+        const neededCount = sampleSize - result.length;
+        
+        if (remainingItems.length > 0) {
+          result.push(...remainingItems.slice(0, neededCount));
+        }
+      }
+      
+      console.log(`抽样分布: ${Object.entries(byType).map(([type, items]) => 
+        `${type}: ${result.filter(item => item.sourceType === type).length}/${items.length}`
+      ).join(', ')}`);
+      
+      return result;
     }
   },
   mounted() {
@@ -371,29 +656,7 @@ export default {
   height: 100%;
   display: flex;
   flex-direction: column;
-}
-
-.graph-toggle-container {
-  padding: 1rem;
-  display: flex;
-  justify-content: center;
-  background-color: #f9fafb;
-  border-bottom: 1px solid #eee;
-}
-
-.toggle-button {
-  padding: 0.6rem 1.2rem;
-  background-color: #2a7d8b;
-  color: white;
-  border: none;
-  border-radius: 4px;
-  font-size: 0.9rem;
-  cursor: pointer;
-  transition: background-color 0.2s;
-}
-
-.toggle-button:hover {
-  background-color: #1a6575;
+  transition: all 0.3s ease;
 }
 
 .knowledge-graph {
@@ -465,5 +728,44 @@ export default {
 
 @keyframes spin {
   to { transform: rotate(360deg); }
+}
+
+.graph-legend {
+  position: absolute;
+  top: 1rem;
+  left: 1rem;
+  z-index: 10;
+  background-color: rgba(255, 255, 255, 0.9);
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  padding: 0.7rem;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
+}
+
+.legend-title {
+  font-weight: 500;
+  margin-bottom: 0.7rem;
+  font-size: 0.9rem;
+  color: #333;
+  border-bottom: 1px solid #eee;
+  padding-bottom: 0.3rem;
+}
+
+.legend-item {
+  display: flex;
+  align-items: center;
+  margin-bottom: 0.5rem;
+}
+
+.legend-color {
+  width: 1rem;
+  height: 1rem;
+  border-radius: 50%;
+  margin-right: 0.8rem;
+}
+
+.legend-label {
+  font-size: 0.85rem;
+  color: #333;
 }
 </style> 
